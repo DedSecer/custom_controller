@@ -15,6 +15,12 @@ car_joint_state.effort = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]         # 初始化关�
 
 target_positions = list(range(6))
 
+# rc r switch is up, car_mode = 2
+# rc r switch is mid, car_mode = 1
+# else, car_mode = 0
+car_mode = 0
+
+
 ## rad from -6.2 to 6.2
 def dm_data_to_rad(data):
     x_min = -12.5
@@ -41,8 +47,13 @@ def move_joint_with_velocity_limit(pub, max_vel, rate):
 
     step_time = 1.0 / rate
     car_current_joint_state = car_joint_state.position[:]
-    # while not done:
     while not rospy.is_shutdown():
+        # keep update pose before auto mode
+        if car_mode != 1:
+            car_current_joint_state = car_joint_state.position[:]
+            rospy.sleep(step_time)
+            continue
+
         global target_positions
         for i in range(len(car_current_joint_state)):
             diff = target_positions[i] - car_current_joint_state[i]
@@ -58,13 +69,14 @@ def motor_position_callback(data):
     """
     订阅电机位置话题后的回调函数
     """
-    global car_joint_state
+    global car_joint_state, car_mode
     car_joint_state.position[0] = data.joint1_angle
     car_joint_state.position[1] = data.joint2_angle
     car_joint_state.position[2] = data.joint3_angle
     car_joint_state.position[3] = data.joint4_angle
     car_joint_state.position[4] = data.joint5_angle
     car_joint_state.position[5] = data.joint6_angle
+    car_mode = data.mode
     # rospy.loginfo(f"当前电机位置: {joint_state.position[2]} \n")
     
 def convert_cc_to_car(joint_values):
@@ -123,5 +135,4 @@ if __name__ == '__main__':
                     target_positions[i] = dm_data_to_rad(data[i])
                 else:
                     target_positions[i] = dji_data_to_rad(data[i])
-            print(target_positions)
             target_positions = convert_cc_to_car(target_positions)
