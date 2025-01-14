@@ -20,6 +20,8 @@ target_positions = list(range(6))
 # else, car_mode = 0
 car_mode = 0
 
+joint4_offset = 0
+
 
 ## rad from -6.2 to 6.2
 def dm_data_to_rad(data):
@@ -83,7 +85,12 @@ def convert_cc_to_car(joint_values):
     """
     Convert the joint values from the custom controller to the car's joint values
     """
+    global joint4_offset
+
+    
     car_joint_values = joint_values[:]
+    if joint4_offset == 0:
+        joint4_offset = car_joint_values[5]
     
     car_joint_values[0] = joint_values[0]
     if car_joint_values[0] > 3.1:
@@ -105,7 +112,7 @@ def convert_cc_to_car(joint_values):
         car_joint_values[3] += 3.1
     
     # car_joint_values[4] -= 3.1
-    car_joint_values[4] -= 2.0
+    car_joint_values[4] -= joint4_offset
     # car_joint_values[4] = -car_joint_values[4]
     
     car_joint_values[5] -= 3.1
@@ -115,7 +122,6 @@ def convert_cc_to_car(joint_values):
 
 
 if __name__ == '__main__':
-    time.sleep(3)
     ## init ros
     rospy.init_node('custom_contoller_node', anonymous=True)
     rate = rospy.Rate(10)
