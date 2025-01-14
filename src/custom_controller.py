@@ -50,7 +50,7 @@ def move_joint_with_velocity_limit(pub, max_vel, rate):
             if abs(diff) > step:
                 # wait for each joint to reach the target position
                 car_current_joint_state[i] += step if diff > 0 else -step
-        print("joint published: ", car_current_joint_state)
+        # print("joint published: ", car_current_joint_state)
         publish_joint_state(pub, car_current_joint_state)
         rospy.sleep(step_time)
     
@@ -78,7 +78,7 @@ def convert_cc_to_car(joint_values):
         car_joint_values[0] -= 3.1
     elif car_joint_values[0] < -3.1:
         car_joint_values[0] += 3.1
-    car_joint_values[0] -= 2.4
+    car_joint_values[0] += 0.7
     
     car_joint_values[1] = -joint_values[1]
     car_joint_values[1] /= 4
@@ -92,8 +92,9 @@ def convert_cc_to_car(joint_values):
     elif car_joint_values[3] < -3.1:
         car_joint_values[3] += 3.1
     
-    car_joint_values[4] -= 3.1
-    car_joint_values[4] -= 0.4
+    # car_joint_values[4] -= 3.1
+    car_joint_values[4] -= 2.0
+    # car_joint_values[4] = -car_joint_values[4]
     
     car_joint_values[5] -= 3.1
     
@@ -102,6 +103,7 @@ def convert_cc_to_car(joint_values):
 
 
 if __name__ == '__main__':
+    time.sleep(3)
     ## init ros
     rospy.init_node('custom_contoller_node', anonymous=True)
     rate = rospy.Rate(10)
@@ -111,7 +113,7 @@ if __name__ == '__main__':
 
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
     print(f"serial opened: {ser.portstr}")
-    threading.Thread(target=move_joint_with_velocity_limit, args=(pub, 0.35, 1000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(pub, 0.4, 1000)).start()
     while not rospy.is_shutdown():
         data = ser.read(12)
         if len(data) == 12:
@@ -121,5 +123,5 @@ if __name__ == '__main__':
                     target_positions[i] = dm_data_to_rad(data[i])
                 else:
                     target_positions[i] = dji_data_to_rad(data[i])
-                    
+            print(target_positions)
             target_positions = convert_cc_to_car(target_positions)
