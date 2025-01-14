@@ -1,0 +1,6 @@
+<launch>
+    <node name="custom_controller_node" pkg="custom_controller" type="custom_controller"/>
+    <node pkg="rosserial_python" type="serial_node.py" name="serial_node" output="screen">
+        <param name="port" value="/dev/ttyACM0"/>
+    </node>
+</launch>
