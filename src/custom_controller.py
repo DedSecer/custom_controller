@@ -13,7 +13,8 @@ car_joint_state.position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]       # 初始化关�
 car_joint_state.velocity = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]       # 初始化关节速度
 car_joint_state.effort = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]         # 初始化关节力矩
 
-target_positions = list(range(6))
+target_positions = [0, 0, 0, 0, 0, 0]
+next_positions = [0, 0, 0, 0, 0, 0]
 
 # rc r switch is up, car_mode = 2
 # rc r switch is mid, car_mode = 1
@@ -42,29 +43,36 @@ def publish_joint_state(pub, joint_values):
     joint_state.position = joint_values
     pub.publish(joint_state)
 
-def move_joint_with_velocity_limit(pub, max_vel, rate):
+def move_joint_with_velocity_limit(joint_index, max_vel, rate):
     """
     分段执行，从 current_positions 到 target_positions，速度不超过 max_vel
     """
-
+    global next_positions
     step_time = 1.0 / rate
-    car_current_joint_state = car_joint_state.position[:]
+    car_current_joint_state = car_joint_state.position[joint_index]
     while not rospy.is_shutdown():
         # keep update pose before auto mode
         if car_mode != 1:
-            car_current_joint_state = car_joint_state.position[:]
+            car_current_joint_state = car_joint_state.position[joint_index]
             rospy.sleep(step_time)
             continue
 
         global target_positions
-        for i in range(len(car_current_joint_state)):
-            diff = target_positions[i] - car_current_joint_state[i]
-            step = max_vel * step_time
-            if abs(diff) > step:
-                # wait for each joint to reach the target position
-                car_current_joint_state[i] += step if diff > 0 else -step
-        # print("joint published: ", car_current_joint_state)
-        publish_joint_state(pub, car_current_joint_state)
+
+        diff = target_positions[joint_index] - car_current_joint_state
+        step = max_vel * step_time
+        if abs(diff) > step:
+            # wait for each joint to reach the target position
+            car_current_joint_state += step if diff > 0 else -step
+        next_positions[joint_index] = car_current_joint_state
+
+        rospy.sleep(step_time)
+
+def publish_step_job(pub, rate):
+    global next_positions
+    step_time = 1.0 / rate
+    while not rospy.is_shutdown():
+        publish_joint_state(pub, next_positions)
         rospy.sleep(step_time)
     
 def motor_position_callback(data):
@@ -131,7 +139,16 @@ if __name__ == '__main__':
 
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
     print(f"serial opened: {ser.portstr}")
-    threading.Thread(target=move_joint_with_velocity_limit, args=(pub, 0.4, 1000)).start()
+
+    threading.Thread(target=move_joint_with_velocity_limit, args=(0, 0.4, 1000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(1, 0.4, 1000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(2, 0.4, 1000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(3, 1, 1000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(4, 8, 400)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(5, 4, 400)).start()
+
+    threading.Thread(target=publish_step_job, args=(pub, 1000)).start()
+
     while not rospy.is_shutdown():
         data = ser.read(12)
         if len(data) == 12:
@@ -142,3 +159,4 @@ if __name__ == '__main__':
                 else:
                     target_positions[i] = dji_data_to_rad(data[i])
             target_positions = convert_cc_to_car(target_positions)
+
