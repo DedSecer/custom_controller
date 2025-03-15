@@ -10,6 +10,7 @@ project(custom_controller)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
+  hjarm_engineer_driver
   sensor_msgs
   std_msgs
 )
