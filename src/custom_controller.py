@@ -47,12 +47,12 @@ def move_joint_with_velocity_limit(joint_index, max_vel, rate):
     """
     分段执行，从 current_positions 到 target_positions，速度不超过 max_vel
     """
-    global next_positions
+    global next_positions, joint4_offset
     step_time = 1.0 / rate
     car_current_joint_state = car_joint_state.position[joint_index]
     while not rospy.is_shutdown():
         # keep update pose before auto mode
-        if car_mode != 1:
+        if car_mode != 2:
             car_current_joint_state = car_joint_state.position[joint_index]
             rospy.sleep(step_time)
             continue
@@ -97,15 +97,15 @@ def convert_cc_to_car(joint_values):
 
     
     car_joint_values = joint_values[:]
-    if joint4_offset == 0:
-        joint4_offset = car_joint_values[5]
-    
+    if joint4_offset == 0 or car_mode != 2:
+        joint4_offset = car_joint_values[4]
     car_joint_values[0] = joint_values[0]
+    car_joint_values[0] += 1.58
     if car_joint_values[0] > 3.1:
         car_joint_values[0] -= 3.1
     elif car_joint_values[0] < -3.1:
         car_joint_values[0] += 3.1
-    car_joint_values[0] += 0.7
+    
     
     car_joint_values[1] = -joint_values[1]
     car_joint_values[1] /= 4
@@ -119,9 +119,7 @@ def convert_cc_to_car(joint_values):
     elif car_joint_values[3] < -3.1:
         car_joint_values[3] += 3.1
     
-    # car_joint_values[4] -= 3.1
     car_joint_values[4] -= joint4_offset
-    # car_joint_values[4] = -car_joint_values[4]
     
     car_joint_values[5] -= 3.1
     
@@ -144,7 +142,7 @@ if __name__ == '__main__':
     threading.Thread(target=move_joint_with_velocity_limit, args=(1, 0.4, 1000)).start()
     threading.Thread(target=move_joint_with_velocity_limit, args=(2, 0.4, 1000)).start()
     threading.Thread(target=move_joint_with_velocity_limit, args=(3, 1, 1000)).start()
-    threading.Thread(target=move_joint_with_velocity_limit, args=(4, 8, 400)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(4, 12, 50)).start()
     threading.Thread(target=move_joint_with_velocity_limit, args=(5, 4, 400)).start()
 
     threading.Thread(target=publish_step_job, args=(pub, 1000)).start()
