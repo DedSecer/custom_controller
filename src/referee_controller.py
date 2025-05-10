@@ -4,7 +4,7 @@ import struct
 import time
 import rospy
 from sensor_msgs.msg import JointState
-from hjarm_engineer_driver.msg import ControlInfo
+from hjarm_engineer_driver.msg import ControlInfo, refereeKeyboard
 import threading
 
 car_joint_state = JointState()
@@ -78,7 +78,12 @@ def publish_step_job(pub, rate):
     while not rospy.is_shutdown():
         publish_joint_state(pub, next_positions)
         rospy.sleep(step_time)
-    
+
+def publish_keyboard_job(pub, rate):
+    step_time = 1.0 / rate
+    while not rospy.is_shutdown():
+        pub.publish(refereeKeyboard())
+        rospy.sleep(step_time)
 
 def motor_position_callback(data):
     """
@@ -134,12 +139,13 @@ def convert_cc_to_car(joint_values):
 
 def read_serial_data(ser):
     """
-    从串口读取数据，解析帧格式为A5 ** ** ** ** 02 03开头的数据
+    从串口读取数据，解析帧格式为A5 ** ** ** ** 02 03或A5 ** ** ** ** 03 04开头的数据
     """
     global target_positions
     
     buffer = bytearray()
     frame_start_idx = -1
+    frame_type = None  # 用于标记当前帧的类型：'joint' 或 'keyboard'
     
     while not rospy.is_shutdown():
         # 读取可用数据
@@ -152,7 +158,7 @@ def read_serial_data(ser):
             while i < len(buffer):
                 # 检查是否有足够的字节判断模式 (至少需要7个字节)
                 if i + 6 < len(buffer):
-                    # 检查是否匹配模式: A5 ** ** ** ** 02 03
+                    # 检查是否匹配关节设置模式: A5 ** ** ** ** 02 03
                     if (buffer[i] == 0xA5 and 
                         buffer[i+5] == 0x02 and 
                         buffer[i+6] == 0x03):
@@ -161,10 +167,54 @@ def read_serial_data(ser):
                         if frame_start_idx >= 0:
                             # 如果已经找到了上一个帧头，提取完整帧
                             frame_data = buffer[frame_start_idx:i]
-                            process_frame(frame_data)
+                            if frame_type == 'joint':
+                                process_jointset(frame_data)
+                            elif frame_type == 'keyboard':
+                                process_keyboard(frame_data)
                         
-                        # 更新帧开始位置
+                        # 更新帧开始位置和类型
                         frame_start_idx = i
+                        frame_type = 'joint'
+                        i += 7  # 跳过已检查的模式字节
+                        continue
+
+                    # 检查是否匹配键盘模式: A5 ** ** ** ** 04 03
+                    elif (buffer[i] == 0xA5 and 
+                          buffer[i+5] == 0x04 and 
+                          buffer[i+6] == 0x03):
+                        
+                        # 找到新的匹配帧头
+                        if frame_start_idx >= 0:
+                            # 如果已经找到了上一个帧头，提取完整帧
+                            frame_data = buffer[frame_start_idx:i]
+                            if frame_type == 'joint':
+                                process_jointset(frame_data)
+                            elif frame_type == 'keyboard':
+                                process_keyboard(frame_data)
+                        
+                        # 更新帧开始位置和类型
+                        frame_start_idx = i
+                        frame_type = 'keyboard'
+                        i += 7  # 跳过已检查的模式字节
+                        continue
+                    
+                    # 检查是否匹配其他格式: A5 ** ** ** ** 04 03 (保留原有功能)
+                    elif (buffer[i] == 0xA5 and 
+                          buffer[i+5] == 0x04 and 
+                          buffer[i+6] == 0x03):
+                        
+                        # 找到新的匹配帧头
+                        if frame_start_idx >= 0:
+                            # 如果已经找到了上一个帧头，提取完整帧
+                            frame_data = buffer[frame_start_idx:i]
+                            if frame_type == 'joint':
+                                process_jointset(frame_data)
+                            elif frame_type == 'keyboard':
+                                process_keyboard(frame_data)
+                        
+                        # 更新帧开始位置和类型 (这里暂时当作关节数据处理)
+                        frame_start_idx = i
+                        frame_type = 'joint'
                         i += 7  # 跳过已检查的模式字节
                         continue
                     
@@ -172,10 +222,14 @@ def read_serial_data(ser):
                 if frame_start_idx >= 0 and i > frame_start_idx and buffer[i] == 0xA5:
                     # 找到A5作为结束标记
                     frame_data = buffer[frame_start_idx:i]
-                    process_frame(frame_data)
+                    if frame_type == 'joint':
+                        process_jointset(frame_data)
+                    elif frame_type == 'keyboard':
+                        process_keyboard(frame_data)
                     
                     # 不增加索引，让下一次循环检查这个A5是否为新帧的开始
                     frame_start_idx = -1
+                    frame_type = None
                     continue
                 
                 i += 1
@@ -191,7 +245,7 @@ def read_serial_data(ser):
             rospy.sleep(0.01)
 
 
-def process_frame(frame_data):
+def process_jointset(frame_data):
     """处理一个完整的数据帧并更新目标位置"""
     global target_positions
     
@@ -220,18 +274,60 @@ def process_frame(frame_data):
     
     # 将目标位置转换为车的关节值
     target_positions = convert_cc_to_car(target_positions)
-    print(target_positions)
+
+def process_keyboard(frame_data):
+    """处理一个完整的键盘数据帧并打印键盘事件"""
+    if not frame_data or len(frame_data) < 19:  # 确保至少有帧头(7字节)+键盘数据(偏移量8+长度2=10)
+        return
+    
+    # 检查帧头是否符合A5 ** ** ** ** 04 03模式
+    if not (frame_data[0] == 0xA5 and frame_data[5] == 0x04 and frame_data[6] == 0x03):
+        return
+    
+    # 提取键盘按键信息（偏移量8，长度2字节）
+    keyboard_offset = 7 + 8  # 帧头7字节 + 偏移量8
+    keyboard_data = frame_data[keyboard_offset] | (frame_data[keyboard_offset + 1] << 8)
+    
+    # 键盘按键映射
+    key_map = {
+        0: 'W',
+        1: 'S',
+        2: 'A',
+        3: 'D',
+        4: 'Shift',
+        5: 'Ctrl',
+        6: 'Q',
+        7: 'E',
+        8: 'R',
+        9: 'F',
+        10: 'G',
+        11: 'Z',
+        12: 'X',
+        13: 'C',
+        14: 'V',
+        15: 'B'
+    }
+    
+    # 检查哪些键被按下并打印
+    pressed_keys = []
+    for bit, key in key_map.items():
+        if keyboard_data & (1 << bit):
+            pressed_keys.append(key)
+    
+    if pressed_keys:
+        print(f"按下的键: {', '.join(pressed_keys)}")
 
 if __name__ == '__main__':
     rospy.init_node('custom_contoller_node', anonymous=True)
     rate = rospy.Rate(10)
-    pub = rospy.Publisher('/joint_set_states', JointState, queue_size=10)
+    joint_set_states_pub = rospy.Publisher('/joint_set_states', JointState, queue_size=10)
+    keyboard_pub = rospy.Publisher('/keyboardInfo', JointState, queue_size=10)
     rospy.Subscriber('/controlInfo', ControlInfo, motor_position_callback)
 
     # 使用固定的COM3串口和921600波特率
     serial_port = '/dev/ttyUSB0'
-    # baudrate = 921600
-    baudrate = 115200
+    baudrate = 921600
+    # baudrate = 115200
 
     
     # 打开串口
@@ -252,7 +348,9 @@ if __name__ == '__main__':
     threading.Thread(target=move_joint_with_velocity_limit, args=(5, 4, 400)).start()
 
     # 启动发布关节状态的线程
-    threading.Thread(target=publish_step_job, args=(pub, 1000)).start()
+    threading.Thread(target=publish_step_job, args=(joint_set_states_pub, 1000)).start()
+    # 启动发布键盘信息的线程
+    # threading.Thread(target=publish_keyboard_job, args=(keyboard_pub, 1000)).start()
     
     # 启动串口读取线程
     threading.Thread(target=read_serial_data, args=(ser,)).start()
