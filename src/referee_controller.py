@@ -21,6 +21,8 @@ next_positions = [0, 0, 0, 0, 0, 0]
 # else, car_mode = 0
 car_mode = 0
 
+jointset_available = 1
+
 joint4_offset = 0
 
 pressed_keys = []
@@ -56,7 +58,7 @@ def move_joint_with_velocity_limit(joint_index, max_vel, rate):
     car_current_joint_state = car_joint_state.position[joint_index]
     while not rospy.is_shutdown():
         # keep update pose before auto mode
-        if car_mode != 2:
+        if car_mode != 2 or not jointset_available:
             car_current_joint_state = car_joint_state.position[joint_index]
             rospy.sleep(step_time)
             continue
@@ -85,7 +87,6 @@ def publish_keyboard_job(pub, rate):
     step_time = 1.0 / rate
     while not rospy.is_shutdown():
         key_info = refereeKeyboard()
-        key_info.hearder.stamp = rospy.Time.now()
         if 'W' in pressed_keys:
             key_info.keyW = True
         if 'A' in pressed_keys:
@@ -268,6 +269,8 @@ def read_serial_data(ser):
 
 def process_jointset(frame_data):
     """处理一个完整的数据帧并更新目标位置"""
+    if not jointset_available:
+        return
     global target_positions
     
     if not frame_data or len(frame_data) < 19:  # 确保至少有帧头(7字节)+6个关节数据(12字节)
@@ -298,7 +301,7 @@ def process_jointset(frame_data):
 
 def process_keyboard(frame_data):
     """处理一个完整的键盘数据帧并打印键盘事件"""
-    global pressed_keys
+    global pressed_keys, jointset_available, target_positions
     if not frame_data or len(frame_data) < 19:  # 确保至少有帧头(7字节)+键盘数据(偏移量8+长度2=10)
         return
     
@@ -335,6 +338,12 @@ def process_keyboard(frame_data):
     for bit, key in key_map.items():
         if keyboard_data & (1 << bit):
             pressed_keys.append(key)
+
+    if 'G' in pressed_keys:
+        jointset_available = 0
+        target_positions = [0, 0, 0, 0, 0, 0]
+    else:
+        jointset_available = 1
     
     if pressed_keys:
         print(f"按下的键: {', '.join(pressed_keys)}")
@@ -344,11 +353,11 @@ if __name__ == '__main__':
     rospy.init_node('custom_contoller_node', anonymous=True)
     rate = rospy.Rate(10)
     joint_set_states_pub = rospy.Publisher('/joint_set_states', JointState, queue_size=10)
-    keyboard_pub = rospy.Publisher('/keyboardInfo', JointState, queue_size=10)
+    keyboard_pub = rospy.Publisher('/keyboardInfo', refereeKeyboard, queue_size=10)
     rospy.Subscriber('/controlInfo', ControlInfo, motor_position_callback)
 
     # 使用固定的COM3串口和921600波特率
-    serial_port = '/dev/ttyUSB0'
+    serial_port = '/dev/ttyUSB_ttl'
     baudrate = 921600
     # baudrate = 115200
 
