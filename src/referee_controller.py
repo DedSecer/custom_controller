@@ -23,6 +23,7 @@ car_mode = 0
 
 joint4_offset = 0
 
+pressed_keys = []
 
 ## rad from -6.2 to 6.2
 def dm_data_to_rad(data):
@@ -80,9 +81,29 @@ def publish_step_job(pub, rate):
         rospy.sleep(step_time)
 
 def publish_keyboard_job(pub, rate):
+    global pressed_keys
     step_time = 1.0 / rate
     while not rospy.is_shutdown():
-        pub.publish(refereeKeyboard())
+        key_info = refereeKeyboard()
+        key_info.hearder.stamp = rospy.Time.now()
+        if 'W' in pressed_keys:
+            key_info.keyW = True
+        if 'A' in pressed_keys:
+            key_info.keyA = True
+        if 'S' in pressed_keys:
+            key_info.keyS = True
+        if 'D' in pressed_keys:
+            key_info.keyD = True
+        if 'Z' in pressed_keys:
+            key_info.keyZ = True
+        if 'X' in pressed_keys:
+            key_info.keyX = True
+        if 'C' in pressed_keys:
+            key_info.keyC = True
+        if 'Ctrl' in pressed_keys:
+            key_info.keyCtrl = True
+        
+        pub.publish(key_info)
         rospy.sleep(step_time)
 
 def motor_position_callback(data):
@@ -277,6 +298,7 @@ def process_jointset(frame_data):
 
 def process_keyboard(frame_data):
     """处理一个完整的键盘数据帧并打印键盘事件"""
+    global pressed_keys
     if not frame_data or len(frame_data) < 19:  # 确保至少有帧头(7字节)+键盘数据(偏移量8+长度2=10)
         return
     
@@ -317,6 +339,7 @@ def process_keyboard(frame_data):
     if pressed_keys:
         print(f"按下的键: {', '.join(pressed_keys)}")
 
+
 if __name__ == '__main__':
     rospy.init_node('custom_contoller_node', anonymous=True)
     rate = rospy.Rate(10)
@@ -350,7 +373,7 @@ if __name__ == '__main__':
     # 启动发布关节状态的线程
     threading.Thread(target=publish_step_job, args=(joint_set_states_pub, 1000)).start()
     # 启动发布键盘信息的线程
-    # threading.Thread(target=publish_keyboard_job, args=(keyboard_pub, 1000)).start()
+    threading.Thread(target=publish_keyboard_job, args=(keyboard_pub, 1000)).start()
     
     # 启动串口读取线程
     threading.Thread(target=read_serial_data, args=(ser,)).start()
