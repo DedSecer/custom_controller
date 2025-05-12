@@ -13,7 +13,8 @@ car_joint_state.position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]       # 初始化关�
 car_joint_state.velocity = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]       # 初始化关节速度
 car_joint_state.effort = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]         # 初始化关节力矩
 
-target_positions = [0, 0, 0, 0, 0, 0]
+INITJOINTPOS = [1.7, 0, -0.4, -2.95, 0, 0]
+target_positions = INITJOINTPOS
 next_positions = [0, 0, 0, 0, 0, 0]
 
 # rc r switch is up, car_mode = 2
@@ -53,18 +54,17 @@ def move_joint_with_velocity_limit(joint_index, max_vel, rate):
     """
     分段执行，从 current_positions 到 target_positions，速度不超过 max_vel
     """
-    global next_positions
+    global next_positions, jointset_available
     step_time = 1.0 / rate
     car_current_joint_state = car_joint_state.position[joint_index]
     while not rospy.is_shutdown():
         # keep update pose before auto mode
-        if car_mode != 2 or not jointset_available:
+        if car_mode != 2:
             car_current_joint_state = car_joint_state.position[joint_index]
             rospy.sleep(step_time)
             continue
 
         global target_positions
-
         diff = target_positions[joint_index] - car_current_joint_state
         step = max_vel * step_time
         if abs(diff) > step:
@@ -170,107 +170,114 @@ def read_serial_data(ser):
     frame_type = None  # 用于标记当前帧的类型：'joint' 或 'keyboard'
     
     while not rospy.is_shutdown():
-        # 读取可用数据
-        if ser.in_waiting > 0:
-            data = ser.read(ser.in_waiting)
-            buffer.extend(data)
-            
-            # 寻找并处理数据帧
-            i = 0
-            while i < len(buffer):
-                # 检查是否有足够的字节判断模式 (至少需要7个字节)
-                if i + 6 < len(buffer):
-                    # 检查是否匹配关节设置模式: A5 ** ** ** ** 02 03
-                    if (buffer[i] == 0xA5 and 
-                        buffer[i+5] == 0x02 and 
-                        buffer[i+6] == 0x03):
-                        
-                        # 找到新的匹配帧头
-                        if frame_start_idx >= 0:
-                            # 如果已经找到了上一个帧头，提取完整帧
-                            frame_data = buffer[frame_start_idx:i]
-                            if frame_type == 'joint':
-                                process_jointset(frame_data)
-                            elif frame_type == 'keyboard':
-                                process_keyboard(frame_data)
-                        
-                        # 更新帧开始位置和类型
-                        frame_start_idx = i
-                        frame_type = 'joint'
-                        i += 7  # 跳过已检查的模式字节
-                        continue
 
-                    # 检查是否匹配键盘模式: A5 ** ** ** ** 04 03
-                    elif (buffer[i] == 0xA5 and 
-                          buffer[i+5] == 0x04 and 
-                          buffer[i+6] == 0x03):
-                        
-                        # 找到新的匹配帧头
-                        if frame_start_idx >= 0:
-                            # 如果已经找到了上一个帧头，提取完整帧
-                            frame_data = buffer[frame_start_idx:i]
-                            if frame_type == 'joint':
-                                process_jointset(frame_data)
-                            elif frame_type == 'keyboard':
-                                process_keyboard(frame_data)
-                        
-                        # 更新帧开始位置和类型
-                        frame_start_idx = i
-                        frame_type = 'keyboard'
-                        i += 7  # 跳过已检查的模式字节
-                        continue
-                    
-                    # 检查是否匹配其他格式: A5 ** ** ** ** 04 03 (保留原有功能)
-                    elif (buffer[i] == 0xA5 and 
-                          buffer[i+5] == 0x04 and 
-                          buffer[i+6] == 0x03):
-                        
-                        # 找到新的匹配帧头
-                        if frame_start_idx >= 0:
-                            # 如果已经找到了上一个帧头，提取完整帧
-                            frame_data = buffer[frame_start_idx:i]
-                            if frame_type == 'joint':
-                                process_jointset(frame_data)
-                            elif frame_type == 'keyboard':
-                                process_keyboard(frame_data)
-                        
-                        # 更新帧开始位置和类型 (这里暂时当作关节数据处理)
-                        frame_start_idx = i
-                        frame_type = 'joint'
-                        i += 7  # 跳过已检查的模式字节
-                        continue
-                    
-                # 如果有设置帧开始位置，检查是否找到下一个A5作为结束
-                if frame_start_idx >= 0 and i > frame_start_idx and buffer[i] == 0xA5:
-                    # 找到A5作为结束标记
-                    frame_data = buffer[frame_start_idx:i]
-                    if frame_type == 'joint':
-                        process_jointset(frame_data)
-                    elif frame_type == 'keyboard':
-                        process_keyboard(frame_data)
-                    
-                    # 不增加索引，让下一次循环检查这个A5是否为新帧的开始
-                    frame_start_idx = -1
-                    frame_type = None
-                    continue
+        # 读取可用数据
+        try:
+            if ser.in_waiting > 0:
+                data = ser.read(ser.in_waiting)
+                buffer.extend(data)
                 
-                i += 1
-            
-            # 处理缓冲区，保留最后可能的不完整帧
-            if frame_start_idx >= 0:
-                buffer = buffer[frame_start_idx:]
-                frame_start_idx = 0
+                # 寻找并处理数据帧
+                i = 0
+                while i < len(buffer):
+                    # 检查是否有足够的字节判断模式 (至少需要7个字节)
+                    if i + 6 < len(buffer):
+                        # 检查是否匹配关节设置模式: A5 ** ** ** ** 02 03
+                        if (buffer[i] == 0xA5 and 
+                            buffer[i+5] == 0x02 and 
+                            buffer[i+6] == 0x03):
+                            
+                            # 找到新的匹配帧头
+                            if frame_start_idx >= 0:
+                                # 如果已经找到了上一个帧头，提取完整帧
+                                frame_data = buffer[frame_start_idx:i]
+                                if frame_type == 'joint':
+                                    process_jointset(frame_data)
+                                elif frame_type == 'keyboard':
+                                    process_keyboard(frame_data)
+                            
+                            # 更新帧开始位置和类型
+                            frame_start_idx = i
+                            frame_type = 'joint'
+                            i += 7  # 跳过已检查的模式字节
+                            continue
+
+                        # 检查是否匹配键盘模式: A5 ** ** ** ** 04 03
+                        elif (buffer[i] == 0xA5 and 
+                            buffer[i+5] == 0x04 and 
+                            buffer[i+6] == 0x03):
+                            
+                            # 找到新的匹配帧头
+                            if frame_start_idx >= 0:
+                                # 如果已经找到了上一个帧头，提取完整帧
+                                frame_data = buffer[frame_start_idx:i]
+                                if frame_type == 'joint':
+                                    process_jointset(frame_data)
+                                elif frame_type == 'keyboard':
+                                    process_keyboard(frame_data)
+                            
+                            # 更新帧开始位置和类型
+                            frame_start_idx = i
+                            frame_type = 'keyboard'
+                            i += 7  # 跳过已检查的模式字节
+                            continue
+                        
+                        # 检查是否匹配其他格式: A5 ** ** ** ** 04 03 (保留原有功能)
+                        elif (buffer[i] == 0xA5 and 
+                            buffer[i+5] == 0x04 and 
+                            buffer[i+6] == 0x03):
+                            
+                            # 找到新的匹配帧头
+                            if frame_start_idx >= 0:
+                                # 如果已经找到了上一个帧头，提取完整帧
+                                frame_data = buffer[frame_start_idx:i]
+                                if frame_type == 'joint':
+                                    process_jointset(frame_data)
+                                elif frame_type == 'keyboard':
+                                    process_keyboard(frame_data)
+                            
+                            # 更新帧开始位置和类型 (这里暂时当作关节数据处理)
+                            frame_start_idx = i
+                            frame_type = 'joint'
+                            i += 7  # 跳过已检查的模式字节
+                            continue
+                        
+                    # 如果有设置帧开始位置，检查是否找到下一个A5作为结束
+                    if frame_start_idx >= 0 and i > frame_start_idx and buffer[i] == 0xA5:
+                        # 找到A5作为结束标记
+                        frame_data = buffer[frame_start_idx:i]
+                        if frame_type == 'joint':
+                            process_jointset(frame_data)
+                        elif frame_type == 'keyboard':
+                            process_keyboard(frame_data)
+                        
+                        # 不增加索引，让下一次循环检查这个A5是否为新帧的开始
+                        frame_start_idx = -1
+                        frame_type = None
+                        continue
+                    
+                    i += 1
+                
+                # 处理缓冲区，保留最后可能的不完整帧
+                if frame_start_idx >= 0:
+                    buffer = buffer[frame_start_idx:]
+                    frame_start_idx = 0
+                else:
+                    # 如果没有正在处理的帧，只保留最后一个字节(可能是下一个A5)
+                    buffer = buffer[-1:] if buffer else bytearray()
             else:
-                # 如果没有正在处理的帧，只保留最后一个字节(可能是下一个A5)
-                buffer = buffer[-1:] if buffer else bytearray()
-        else:
-            rospy.sleep(0.01)
+                rospy.sleep(0.01)
+        except OSError:
+            print("dev os error")
+            continue
 
 
 def process_jointset(frame_data):
     """处理一个完整的数据帧并更新目标位置"""
+    global jointset_available
     if not jointset_available:
         return
+
     global target_positions
     
     if not frame_data or len(frame_data) < 19:  # 确保至少有帧头(7字节)+6个关节数据(12字节)
@@ -338,11 +345,15 @@ def process_keyboard(frame_data):
     for bit, key in key_map.items():
         if keyboard_data & (1 << bit):
             pressed_keys.append(key)
-
-    if 'G' in pressed_keys:
+    if 'G' in pressed_keys and 'Ctrl' in pressed_keys:
         jointset_available = 0
-        target_positions = [0, 0, 0, 0, 0, 0]
-    else:
+        target_positions = [1.93, -0.97, -0.82, -2.0, 0, 0]
+    elif 'G' in pressed_keys:
+        jointset_available = 0
+        target_positions = [1.7, -2.15, -1.13, -2.95, 0, 0]
+
+    if 'F' in pressed_keys:
+        target_positions = INITJOINTPOS
         jointset_available = 1
     
     if pressed_keys:
@@ -372,12 +383,12 @@ if __name__ == '__main__':
         sys.exit(1)
 
     # 启动关节控制线程
-    threading.Thread(target=move_joint_with_velocity_limit, args=(0, 0.4, 1000)).start()
-    threading.Thread(target=move_joint_with_velocity_limit, args=(1, 0.4, 1000)).start()
-    threading.Thread(target=move_joint_with_velocity_limit, args=(2, 0.4, 1000)).start()
-    threading.Thread(target=move_joint_with_velocity_limit, args=(3, 1, 1000)).start()
-    threading.Thread(target=move_joint_with_velocity_limit, args=(4, 8, 400)).start()
-    threading.Thread(target=move_joint_with_velocity_limit, args=(5, 4, 400)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(0, 1.2, 2000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(1, 1.2, 2000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(2, 1.2, 2000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(3, 2.3, 2000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(4, 20, 800)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(5, 8, 800)).start()
 
     # 启动发布关节状态的线程
     threading.Thread(target=publish_step_job, args=(joint_set_states_pub, 1000)).start()
