@@ -15,6 +15,8 @@ car_joint_state.effort = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]         # 初始化关�
 
 INITJOINTPOS = [1.7, 0, -0.4, -2.95, 0, 0]
 target_positions = INITJOINTPOS
+INITJOINTPOS = [1.7, 0, -0.4, -2.95, 0, 0]
+target_positions = INITJOINTPOS
 next_positions = [0, 0, 0, 0, 0, 0]
 
 # rc r switch is up, car_mode = 2
@@ -27,6 +29,8 @@ jointset_available = 1
 joint4_offset = 0
 
 pressed_keys = []
+
+move_path_running = 0
 
 ## rad from -6.2 to 6.2
 def dm_data_to_rad(data):
@@ -103,6 +107,8 @@ def publish_keyboard_job(pub, rate):
             key_info.keyC = True
         if 'Ctrl' in pressed_keys:
             key_info.keyCtrl = True
+        if 'Shift' in pressed_keys:
+            key_info.keyShift = True
         
         pub.publish(key_info)
         rospy.sleep(step_time)
@@ -164,12 +170,12 @@ def read_serial_data(ser):
     从串口读取数据，解析帧格式为A5 ** ** ** ** 02 03或A5 ** ** ** ** 03 04开头的数据
     """
     global target_positions
-    
     buffer = bytearray()
     frame_start_idx = -1
     frame_type = None  # 用于标记当前帧的类型：'joint' 或 'keyboard'
     
     while not rospy.is_shutdown():
+
 
         # 读取可用数据
         try:
@@ -355,9 +361,27 @@ def process_keyboard(frame_data):
     if 'F' in pressed_keys:
         target_positions = INITJOINTPOS
         jointset_available = 1
-    
+
     if pressed_keys:
         print(f"按下的键: {', '.join(pressed_keys)}")
+
+
+def check_done(current_position, target_position):
+    done_flag = 1
+    for joint_i in range(6):
+        if current_position[joint_i] - target_position[joint_i] > 0.01:
+            done_flag = 0
+    return done_flag
+        
+
+def move_path(position_que):
+    global car_joint_state, target_positions, move_path_running
+    rate = 10
+    for que_i in range(len(position_que)):
+        target_positions = position_que[que_i]
+        while not check_done(car_joint_state.position, target_positions):
+            rospy.sleep(1.0/rate) 
+    move_path_running = 0
 
 
 if __name__ == '__main__':
@@ -367,7 +391,6 @@ if __name__ == '__main__':
     keyboard_pub = rospy.Publisher('/keyboardInfo', refereeKeyboard, queue_size=10)
     rospy.Subscriber('/controlInfo', ControlInfo, motor_position_callback)
 
-    # 使用固定的COM3串口和921600波特率
     serial_port = '/dev/ttyUSB_ttl'
     baudrate = 921600
     # baudrate = 115200
