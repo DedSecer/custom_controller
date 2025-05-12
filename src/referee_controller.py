@@ -13,7 +13,8 @@ car_joint_state.position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]       # 初始化关�
 car_joint_state.velocity = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]       # 初始化关节速度
 car_joint_state.effort = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]         # 初始化关节力矩
 
-target_positions = [0, 0, 0, 0, 0, 0]
+INITJOINTPOS = [1.7, 0, -0.4, -2.95, 0, 0]
+target_positions = INITJOINTPOS
 next_positions = [0, 0, 0, 0, 0, 0]
 
 # rc r switch is up, car_mode = 2
@@ -53,18 +54,17 @@ def move_joint_with_velocity_limit(joint_index, max_vel, rate):
     """
     分段执行，从 current_positions 到 target_positions，速度不超过 max_vel
     """
-    global next_positions
+    global next_positions, jointset_available
     step_time = 1.0 / rate
     car_current_joint_state = car_joint_state.position[joint_index]
     while not rospy.is_shutdown():
         # keep update pose before auto mode
-        if car_mode != 2 or not jointset_available:
+        if car_mode != 2:
             car_current_joint_state = car_joint_state.position[joint_index]
             rospy.sleep(step_time)
             continue
 
         global target_positions
-
         diff = target_positions[joint_index] - car_current_joint_state
         step = max_vel * step_time
         if abs(diff) > step:
@@ -103,6 +103,8 @@ def publish_keyboard_job(pub, rate):
             key_info.keyC = True
         if 'Ctrl' in pressed_keys:
             key_info.keyCtrl = True
+        if 'Shift' in pressed_keys:
+            key_info.keyShift = True
         
         pub.publish(key_info)
         rospy.sleep(step_time)
@@ -164,12 +166,12 @@ def read_serial_data(ser):
     从串口读取数据，解析帧格式为A5 ** ** ** ** 02 03或A5 ** ** ** ** 03 04开头的数据
     """
     global target_positions
-    
     buffer = bytearray()
     frame_start_idx = -1
     frame_type = None  # 用于标记当前帧的类型：'joint' 或 'keyboard'
     
     while not rospy.is_shutdown():
+
         # 读取可用数据
         if ser.in_waiting > 0:
             data = ser.read(ser.in_waiting)
@@ -269,8 +271,10 @@ def read_serial_data(ser):
 
 def process_jointset(frame_data):
     """处理一个完整的数据帧并更新目标位置"""
+    global jointset_available
     if not jointset_available:
         return
+
     global target_positions
     
     if not frame_data or len(frame_data) < 19:  # 确保至少有帧头(7字节)+6个关节数据(12字节)
@@ -341,10 +345,12 @@ def process_keyboard(frame_data):
 
     if 'G' in pressed_keys:
         jointset_available = 0
-        target_positions = [0, 0, 0, 0, 0, 0]
-    else:
+        target_positions = [1.7, -2.15, -1.13, -2.95, 0, 0]
+
+    if 'F' in pressed_keys:
+        target_positions = INITJOINTPOS
         jointset_available = 1
-    
+
     if pressed_keys:
         print(f"按下的键: {', '.join(pressed_keys)}")
 
@@ -372,12 +378,12 @@ if __name__ == '__main__':
         sys.exit(1)
 
     # 启动关节控制线程
-    threading.Thread(target=move_joint_with_velocity_limit, args=(0, 0.4, 1000)).start()
-    threading.Thread(target=move_joint_with_velocity_limit, args=(1, 0.4, 1000)).start()
-    threading.Thread(target=move_joint_with_velocity_limit, args=(2, 0.4, 1000)).start()
-    threading.Thread(target=move_joint_with_velocity_limit, args=(3, 1, 1000)).start()
-    threading.Thread(target=move_joint_with_velocity_limit, args=(4, 8, 400)).start()
-    threading.Thread(target=move_joint_with_velocity_limit, args=(5, 4, 400)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(0, 1.2, 2000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(1, 1.2, 2000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(2, 1.2, 2000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(3, 2.3, 2000)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(4, 20, 800)).start()
+    threading.Thread(target=move_joint_with_velocity_limit, args=(5, 8, 800)).start()
 
     # 启动发布关节状态的线程
     threading.Thread(target=publish_step_job, args=(joint_set_states_pub, 1000)).start()
