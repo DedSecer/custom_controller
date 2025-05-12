@@ -28,6 +28,8 @@ joint4_offset = 0
 
 pressed_keys = []
 
+move_path_running = 0
+
 ## rad from -6.2 to 6.2
 def dm_data_to_rad(data):
     x_min = -12.5
@@ -349,7 +351,10 @@ def process_keyboard(frame_data):
 
     if 'G' in pressed_keys:
         jointset_available = 0
-        target_positions = [1.7, -2.15, -1.13, -2.95, 0, 0]
+        target_positions_path = [[1.7, -2.15, -1.13, -2.95, 0, 0]]
+        if not move_path_running:
+            move_path_running = 1
+            threading.Thread(target=move_path, args=(target_positions_path)).start()
 
     if 'F' in pressed_keys:
         target_positions = INITJOINTPOS
@@ -359,6 +364,24 @@ def process_keyboard(frame_data):
         print(f"按下的键: {', '.join(pressed_keys)}")
 
 
+def check_done(current_position, target_position):
+    done_flag = 1
+    for joint_i in range(6):
+        if current_position[joint_i] - target_position[joint_i] > 0.01:
+            done_flag = 0
+    return done_flag
+        
+
+def move_path(position_que):
+    global car_joint_state, target_positions, move_path_running
+    rate = 10
+    for que_i in range(len(position_que)):
+        target_positions = position_que[que_i]
+        while not check_done(car_joint_state.position, target_positions):
+            rospy.sleep(1.0/rate) 
+    move_path_running = 0
+
+
 if __name__ == '__main__':
     rospy.init_node('custom_contoller_node', anonymous=True)
     rate = rospy.Rate(10)
@@ -366,7 +389,6 @@ if __name__ == '__main__':
     keyboard_pub = rospy.Publisher('/keyboardInfo', refereeKeyboard, queue_size=10)
     rospy.Subscriber('/controlInfo', ControlInfo, motor_position_callback)
 
-    # 使用固定的COM3串口和921600波特率
     serial_port = '/dev/ttyUSB_ttl'
     baudrate = 921600
     # baudrate = 115200
