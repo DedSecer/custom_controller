@@ -15,8 +15,6 @@ car_joint_state.effort = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]         # 初始化关�
 
 INITJOINTPOS = [1.7, 0, -0.4, -2.95, 0, 0]
 target_positions = INITJOINTPOS
-INITJOINTPOS = [1.7, 0, -0.4, -2.95, 0, 0]
-target_positions = INITJOINTPOS
 next_positions = [0, 0, 0, 0, 0, 0]
 
 # rc r switch is up, car_mode = 2
@@ -63,7 +61,7 @@ def move_joint_with_velocity_limit(joint_index, max_vel, rate):
     car_current_joint_state = car_joint_state.position[joint_index]
     while not rospy.is_shutdown():
         # keep update pose before auto mode
-        if car_mode != 2:
+        if car_mode != 1:
             car_current_joint_state = car_joint_state.position[joint_index]
             rospy.sleep(step_time)
             continue
@@ -136,7 +134,7 @@ def convert_cc_to_car(joint_values):
 
     
     car_joint_values = joint_values[:]
-    if joint4_offset == 0 or car_mode != 2:
+    if joint4_offset == 0 or car_mode != 1:
         joint4_offset = car_joint_values[4]
     car_joint_values[0] = joint_values[0]
     car_joint_values[0] += 1.58
@@ -351,14 +349,22 @@ def process_keyboard(frame_data):
     for bit, key in key_map.items():
         if keyboard_data & (1 << bit):
             pressed_keys.append(key)
+
+
     if 'G' in pressed_keys and 'Ctrl' in pressed_keys:
         jointset_available = 0
-        target_positions = [1.93, -0.97, -0.82, -2.0, 0, 0]
+        p = [[3.84, -1.34, -1.48, 0.28, 2.46, 0.28],[3.65, 0, -1.0, 0.54, 0, 0.2]]
+        move_path(p)
+
     elif 'G' in pressed_keys:
         jointset_available = 0
-        target_positions = [1.7, -2.15, -1.13, -2.95, 0, 0]
+        target_positions = [1.7, -2.15, -1.13, 0, 0, 0]
+
+    if 'R' in pressed_keys and 'Ctrl' in pressed_keys:
+        threading.Thread(store_task).start()
 
     if 'F' in pressed_keys:
+        # back to custom controller mode
         target_positions = INITJOINTPOS
         jointset_available = 1
 
@@ -369,19 +375,74 @@ def process_keyboard(frame_data):
 def check_done(current_position, target_position):
     done_flag = 1
     for joint_i in range(6):
-        if current_position[joint_i] - target_position[joint_i] > 0.01:
+    # for joint_i in range(4):
+
+        if current_position[joint_i] - target_position[joint_i] > 0.025:
+            print(str(joint_i) + "  " + str(current_position[joint_i] - target_position[joint_i]))
             done_flag = 0
+            break
     return done_flag
         
 
 def move_path(position_que):
     global car_joint_state, target_positions, move_path_running
+    if move_path_running:
+        return
+    move_path_running = 1
     rate = 10
     for que_i in range(len(position_que)):
         target_positions = position_que[que_i]
         while not check_done(car_joint_state.position, target_positions):
             rospy.sleep(1.0/rate) 
     move_path_running = 0
+
+def store_task():
+    global storing, target_position
+    if storing:
+        return
+    storing = 1
+    target_positions = [1.7, -2.15, -1.13, -2.95, 0, 0] # TODO: check position
+    while not check_done(car_joint_state.position, target_position):
+        rospy.sleep(0.1)
+    set_arm_pump(1, 1) # open store pump
+    set_arm_pump(2, 0) # close arm pump
+    store_time = rospy.Time.now()
+    while rospy.Time.now() - store_time < 0.5:
+        rospy.sleep(0.1)
+    set_arm_pump(0, keyboard_pub)
+    storing = 0
+
+def get_golden_task():
+    global storing, target_position
+    if storing:
+        return
+    storing = 1
+    target_positions = [1.7, -2.15, -1.13, -2.95, 0, 0] # TODO: check position
+    while not check_done(car_joint_state.position, target_position):
+        rospy.sleep(0.1)
+    
+    set_arm_pump(1, 1) # open arm pump
+    set_arm_pump(2, 0) # close gloden pump
+    store_time = rospy.Time.now()
+    while rospy.Time.now() - store_time < 0.5:
+        rospy.sleep(0.1)
+    set_arm_pump(0, keyboard_pub)
+    storing = 0
+
+def set_arm_pump(pump_i, state):
+    puber = rospy.Publisher('/keyboardInfo', refereeKeyboard, queue_size=10)
+    key_info = refereeKeyboard()
+    if (state == 1):
+        key_info.keyCtrl = True
+        if pump_i == 0:
+            key_info.keyZ = True
+        elif pump_i == 1:
+            key_info.keyX = True
+        elif pump_i == 2:
+            key_info.keyC = True
+
+    puber.publish(key_info)
+
 
 
 if __name__ == '__main__':
