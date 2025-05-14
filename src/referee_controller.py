@@ -30,6 +30,8 @@ pressed_keys = []
 
 move_path_running = 0
 
+done_flag = 0
+
 ## rad from -6.2 to 6.2
 def dm_data_to_rad(data):
     x_min = -12.5
@@ -130,14 +132,14 @@ def convert_cc_to_car(joint_values):
     """
     Convert the joint values from the custom controller to the car's joint values
     """
-    global joint4_offset
+    # global joint4_offset
 
     
     car_joint_values = joint_values[:]
-    if joint4_offset == 0 or car_mode != 1:
-        joint4_offset = car_joint_values[4]
+    # if joint4_offset == 0 or car_mode != 1:
+    #     joint4_offset = car_joint_values[4]
     car_joint_values[0] = joint_values[0]
-    car_joint_values[0] += 1.58
+    car_joint_values[0] += 2.1
     if car_joint_values[0] > 3.1:
         car_joint_values[0] -= 3.1
     elif car_joint_values[0] < -3.1:
@@ -156,7 +158,7 @@ def convert_cc_to_car(joint_values):
     # elif car_joint_values[3] < -3.1:
     #     car_joint_values[3] += 3.1
     
-    car_joint_values[4] -= joint4_offset
+    # car_joint_values[4] -= joint4_offset
     
     car_joint_values[5] -= 3.1
     
@@ -306,7 +308,6 @@ def process_jointset(frame_data):
             target_positions[i] = dm_data_to_rad(joint_values[i])
         else:
             target_positions[i] = dji_data_to_rad(joint_values[i])
-    
     # 将目标位置转换为车的关节值
     target_positions = convert_cc_to_car(target_positions)
 
@@ -353,8 +354,8 @@ def process_keyboard(frame_data):
 
     if 'G' in pressed_keys and 'Ctrl' in pressed_keys:
         jointset_available = 0
-        p = [[3.84, -1.34, -1.48, 0.28, 2.46, 0.28],[3.65, 0, -1.0, 0.54, 0, 0.2]]
-        move_path(p)
+        p = [[3.68, -0.15, -0.3, 0.23, 0.07, -0.016], [3.85, -1.37, -1.47, 0.01, 2.4, -0.24]]
+        threading.Thread(target=move_path, args=(p,)).start()
 
     elif 'G' in pressed_keys:
         jointset_available = 0
@@ -363,7 +364,7 @@ def process_keyboard(frame_data):
     if 'R' in pressed_keys and 'Ctrl' in pressed_keys:
         threading.Thread(store_task).start()
 
-    if 'F' in pressed_keys:
+    if 'F' in pressed_keys and not move_path_running:
         # back to custom controller mode
         target_positions = INITJOINTPOS
         jointset_available = 1
@@ -372,27 +373,29 @@ def process_keyboard(frame_data):
         print(f"按下的键: {', '.join(pressed_keys)}")
 
 
-def check_done(current_position, target_position):
-    done_flag = 1
-    for joint_i in range(6):
-    # for joint_i in range(4):
-
-        if current_position[joint_i] - target_position[joint_i] > 0.025:
-            print(str(joint_i) + "  " + str(current_position[joint_i] - target_position[joint_i]))
-            done_flag = 0
-            break
-    return done_flag
+def check_done():
+    global done_flag, target_positions
+    while not rospy.is_shutdown():
+        done_flag_tmp = 1
+        for joint_i in range(4):
+            if abs(car_joint_state.position[joint_i] - target_positions[joint_i]) > 0.12: # or timeout
+                done_flag_tmp = 0
+                break
+        done_flag = done_flag_tmp
+        rospy.sleep(0.1)
         
 
 def move_path(position_que):
-    global car_joint_state, target_positions, move_path_running
+    global target_positions, move_path_running, done_flag
     if move_path_running:
         return
     move_path_running = 1
     rate = 10
     for que_i in range(len(position_que)):
+        print("que_i",que_i)
         target_positions = position_que[que_i]
-        while not check_done(car_joint_state.position, target_positions):
+        done_flag = 0
+        while not done_flag:
             rospy.sleep(1.0/rate) 
     move_path_running = 0
 
@@ -402,7 +405,7 @@ def store_task():
         return
     storing = 1
     target_positions = [1.7, -2.15, -1.13, -2.95, 0, 0] # TODO: check position
-    while not check_done(car_joint_state.position, target_position):
+    while not done_flag:
         rospy.sleep(0.1)
     set_arm_pump(1, 1) # open store pump
     set_arm_pump(2, 0) # close arm pump
@@ -418,7 +421,7 @@ def get_golden_task():
         return
     storing = 1
     target_positions = [1.7, -2.15, -1.13, -2.95, 0, 0] # TODO: check position
-    while not check_done(car_joint_state.position, target_position):
+    while not done_flag:
         rospy.sleep(0.1)
     
     set_arm_pump(1, 1) # open arm pump
@@ -481,6 +484,9 @@ if __name__ == '__main__':
     
     # 启动串口读取线程
     threading.Thread(target=read_serial_data, args=(ser,)).start()
+    
+    threading.Thread(target=check_done).start()
+
     
     # 主循环，保持程序运行
     try:
