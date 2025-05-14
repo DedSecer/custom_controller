@@ -175,8 +175,6 @@ def read_serial_data(ser):
     frame_type = None  # 用于标记当前帧的类型：'joint' 或 'keyboard'
     
     while not rospy.is_shutdown():
-
-
         # 读取可用数据
         try:
             if ser.in_waiting > 0:
@@ -274,8 +272,14 @@ def read_serial_data(ser):
             else:
                 rospy.sleep(0.01)
         except OSError:
-            print("dev os error")
-            continue
+            print("oserror")
+            try:
+                ser.close()
+                rospy.sleep(1)
+                ser = serial.Serial(serial_port, baudrate, timeout=0.1)
+            except:
+                print("out")
+                rospy.sleep(1)
 
 
 def process_jointset(frame_data):
